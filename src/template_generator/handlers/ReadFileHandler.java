@@ -1,6 +1,9 @@
 package template_generator.handlers;
 
 
+import static org.eclipse.jdt.core.dom.AST.JLS8;
+import static org.eclipse.jdt.core.dom.ASTParser.newParser;
+
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
@@ -17,6 +20,8 @@ import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ITreeSelection;
 import org.eclipse.jface.viewers.TreePath;
 import org.eclipse.jface.viewers.TreeSelection;
+import org.eclipse.text.edits.MalformedTreeException;
+import org.eclipse.text.edits.TextEdit;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
@@ -25,6 +30,7 @@ import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IAdaptable;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IField;
 import org.eclipse.jdt.core.IJavaModel;
@@ -36,20 +42,25 @@ import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.Signature;
+import org.eclipse.jdt.core.dom.AST;
+import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.ASTParser;
+import org.eclipse.jdt.core.dom.ASTVisitor;
+import org.eclipse.jdt.core.dom.Block;
+import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.MethodDeclaration;
+import org.eclipse.jdt.core.dom.Statement;
+import org.eclipse.jdt.core.dom.StringLiteral;
+import org.eclipse.jdt.core.dom.TypeDeclaration;
+import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
+import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
+import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 
 
 public class ReadFileHandler extends AbstractHandler {
-	private IWorkbenchWindow window;
-    private IWorkbenchPage activePage;
 
-    private IProject theProject;
-    private IResource theResource;
-    private IFile theFile;
-
-    private String workspaceName;
-    private String projectName;
-    private String fileName;
+	private String templateComment;
 	
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
@@ -65,7 +76,13 @@ public class ReadFileHandler extends AbstractHandler {
                 printProjectInfo(project);
             } catch (CoreException e) {
                 e.printStackTrace();
-            }
+            } catch (MalformedTreeException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (BadLocationException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
         }
 		
 		
@@ -107,7 +124,7 @@ public class ReadFileHandler extends AbstractHandler {
 
 
     private void printProjectInfo(IProject project) throws CoreException,
-            JavaModelException {
+            JavaModelException, MalformedTreeException, BadLocationException {
         System.out.println("Working in project " + project.getName());
         // check if we have a Java project
         if (project.isNatureEnabled("org.eclipse.jdt.core.javanature")) {
@@ -117,15 +134,9 @@ public class ReadFileHandler extends AbstractHandler {
     }
 
     private void printPackageInfos(IJavaProject javaProject)
-            throws JavaModelException {
+            throws JavaModelException, MalformedTreeException, BadLocationException {
         IPackageFragment[] packages = javaProject.getPackageFragments();
         for (IPackageFragment mypackage : packages) {
-            // Package fragments include all packages in the
-            // classpath
-            // We will only look at the package from the source
-            // folder
-            // K_BINARY would include also included JARS, e.g.
-            // rt.jar
             if (mypackage.getKind() == IPackageFragmentRoot.K_SOURCE) {
                 System.out.println("Package " + mypackage.getElementName());
                 printICompilationUnitInfo(mypackage);
@@ -135,50 +146,45 @@ public class ReadFileHandler extends AbstractHandler {
         }
     }
 	private void printICompilationUnitInfo(IPackageFragment mypackage)
-            throws JavaModelException {
+            throws JavaModelException, MalformedTreeException, BadLocationException {
         for (ICompilationUnit unit : mypackage.getCompilationUnits()) {
-            printCompilationUnitDetails(unit);
-
+        	printCompilationUnitDetails(unit);
         }
     }
 
-    private void printIMethods(ICompilationUnit unit) throws JavaModelException {
+	private void printIMethods(ICompilationUnit unit) throws JavaModelException {
         IType[] allTypes = unit.getAllTypes();
         for (IType type : allTypes) {
         	if(type.isClass()) {
-            	System.out.println("\nEvaluating type: " + type.getElementName());
-                System.out.println("Fields:");
+        		this.templateComment = "/*TEMPLATE\n";
+            	System.out.println("\n"+type.getElementName());
                 printIClassDetails(type);
-                System.out.println("Methods:");
                 printIMethodDetails(type);
+            	this.templateComment += "*/";
+                System.out.println(this.templateComment);
         	}
         }
     }
 
     private void printCompilationUnitDetails(ICompilationUnit unit)
             throws JavaModelException {
-        System.out.println("Source file " + unit.getElementName());
         Document doc = new Document(unit.getSource());
-        System.out.println("Has number of lines: " + doc.getNumberOfLines());
         printIMethods(unit);
     }
 
-    private void printIMethodDetails(IType type) throws JavaModelException {
+    private void printIMethodDetails(IType type) throws JavaModelException {	
         IMethod[] methods = type.getMethods();
+        this.templateComment += " * METHODS: \n";
         for (IMethod method : methods) {
-            System.out.println("Method name " + method.getElementName());
-            System.out.println("Signature :" + method.getSignature().toString());
-            System.out.println("Return Type " + Signature.getSignatureSimpleName(method.getReturnType()));
-
+        	this.templateComment += " * ... this."+method.getElementName() +"("+method.getSignature()+") ...    - " + Signature.getSignatureSimpleName(method.getReturnType())+"\n";
         }
     }
     
     private void printIClassDetails(IType type) throws JavaModelException {
-        IField[] methods = type.getFields();
-        for (IField field : methods) {
-            System.out.println("Field name: " + field.getElementName());
-            System.out.println("Type: " + Signature.getSignatureSimpleName(field.getTypeSignature()));
+        IField[] fields = type.getFields();
+        this.templateComment += " * FIELDS: \n";
+        for (IField field : fields) {
+        	this.templateComment += " * ... this."+field.getElementName()+" ...   - " + Signature.getSignatureSimpleName(field.getTypeSignature())+"\n";
         }
     }
-    
 }
