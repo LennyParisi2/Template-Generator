@@ -1,0 +1,14 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Template_Generator
+Bundle-SymbolicName: Template_Generator;singleton:=true
+Bundle-Version: 1.0.0.0
+Bundle-Vendor: Leonard Parisi
+Require-Bundle: org.eclipse.ui,
+ org.eclipse.core.resources,
+ org.eclipse.equinox.registry,
+ org.eclipse.jdt.core
+Automatic-Module-Name: Template_Generator
+Bundle-RequiredExecutionEnvironment: JavaSE-1.8
+Bundle-ClassPath: org.eclipse.text_3.5.0.jar,
+ .
