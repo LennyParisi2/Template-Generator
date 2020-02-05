@@ -4,6 +4,9 @@ package template_generator.handlers;
 import static org.eclipse.jdt.core.dom.AST.JLS8;
 import static org.eclipse.jdt.core.dom.ASTParser.newParser;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
@@ -33,6 +36,7 @@ import org.eclipse.core.runtime.IAdaptable;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IField;
+import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaModel;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IMethod;
@@ -158,7 +162,9 @@ public class ReadFileHandler extends AbstractHandler {
         	if(type.isClass()) {
         		this.templateComment = "/*TEMPLATE\n";
             	System.out.println("\n"+type.getElementName());
+                this.templateComment += " * FIELDS: \n";
                 printIClassDetails(type);
+                this.templateComment += " * METHODS: \n";
                 printIMethodDetails(type);
             	this.templateComment += "*/";
                 System.out.println(this.templateComment);
@@ -168,21 +174,48 @@ public class ReadFileHandler extends AbstractHandler {
 
     private void printCompilationUnitDetails(ICompilationUnit unit)
             throws JavaModelException {
-        Document doc = new Document(unit.getSource());
+//        Document doc = new Document(unit.getSource());
         printIMethods(unit);
     }
 
     private void printIMethodDetails(IType type) throws JavaModelException {	
         IMethod[] methods = type.getMethods();
-        this.templateComment += " * METHODS: \n";
         for (IMethod method : methods) {
-        	this.templateComment += " * ... this."+method.getElementName() +"("+method.getSignature()+") ...    - " + Signature.getSignatureSimpleName(method.getReturnType())+"\n";
+        	this.templateComment += " * ... this."+method.getElementName() +"("+Signature.getSignatureSimpleName(method.getSignature()).split(" \\(")[0]+") ...    - " + Signature.getSignatureSimpleName(method.getReturnType())+"\n";
+        }
+        
+
+    	String parentClassName = type.getSuperclassName();
+        if(parentClassName!=null) {
+        	// Call this on the parent class basically
+        }
+        
+    }
+
+    private void getMethodDetailsOf(Class<?> type) {
+    	System.out.println("Getting class methods for: " + type.getSimpleName());
+    	Method[] methods = type.getMethods();
+
+        for (Method method : methods) {
+        	
+        	String params = "";
+        	for(Parameter param :  method.getParameters()) {
+        		params += Signature.getSignatureSimpleName(param.getName())+",";
+        	}
+        	
+        	this.templateComment += " * ... this."+method.getName() +"("+params+") ...    - " + method.getReturnType().getSimpleName()+"\n";
+        }
+        
+        if(type.getSuperclass()!=null) {
+        	System.out.println("Getting superclass: " + type.getSuperclass().getSimpleName());
+        	getMethodDetailsOf(type.getSuperclass());
         }
     }
     
+    
+    
     private void printIClassDetails(IType type) throws JavaModelException {
         IField[] fields = type.getFields();
-        this.templateComment += " * FIELDS: \n";
         for (IField field : fields) {
         	this.templateComment += " * ... this."+field.getElementName()+" ...   - " + Signature.getSignatureSimpleName(field.getTypeSignature())+"\n";
         }
