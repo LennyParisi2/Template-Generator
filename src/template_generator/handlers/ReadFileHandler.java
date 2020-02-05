@@ -1,6 +1,5 @@
 package template_generator.handlers;
 
-
 import static org.eclipse.jdt.core.dom.AST.JLS8;
 import static org.eclipse.jdt.core.dom.ASTParser.newParser;
 
@@ -52,6 +51,7 @@ import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.Block;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.Statement;
 import org.eclipse.jdt.core.dom.StringLiteral;
@@ -69,7 +69,6 @@ public class ReadFileHandler extends AbstractHandler {
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
 		
-		
 		IWorkspace workspace = ResourcesPlugin.getWorkspace();
         IWorkspaceRoot root = workspace.getRoot();
         // Get all projects in the workspace
@@ -77,54 +76,57 @@ public class ReadFileHandler extends AbstractHandler {
         // Loop over all projects
         for (IProject project : projects) {
             try {
-                printProjectInfo(project);
+                analyzeFields(project);
             } catch (CoreException e) {
                 e.printStackTrace();
-            } catch (MalformedTreeException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (BadLocationException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
+            }
         }
-		
-		
-		
-		
-		// ============================================================================================================
-        // The execute method of the handler is invoked to handle the event. As we only contribute to Explorer
-        // Navigator views we expect to get a selection tree event
-        // ============================================================================================================
-//        this.window = HandlerUtil.getActiveWorkbenchWindow(event);
-//        // Get the active WorkbenchPage
-//        this.activePage = this.window.getActivePage();
-//
-//        // Get the Selection from the active WorkbenchPage page
-//        ISelection selection = this.activePage.getSelection();
-//        if(selection instanceof ITreeSelection) {
-//            TreeSelection treeSelection = (TreeSelection) selection;
-//            TreePath[] treePaths = treeSelection.getPaths();
-//            TreePath treePath = treePaths[0];
-//		
-//            Object file = treePath.getLastSegment();
-//            
-//            if(file instanceof ICompilationUnit) {
-//            	ICompilationUnit unit = (ICompilationUnit)file;
-//            	try {
-//					printFile(unit);
-//				} catch (JavaModelException e) {
-//					// TODO Auto-generated catch block
-//					e.printStackTrace();
-//				}
-//            }
-//            
-//        }else {
-//        	MessageDialog.openError(this.window.getShell(), "Error", "Please select a file from the project explorer");
-//        }
-		
 		return null;
 	}
+	
+	/* TEMP */
+	private void analyzeFields(IProject project) throws JavaModelException {
+        IPackageFragment[] packages = JavaCore.create(project).getPackageFragments();
+        // parse(JavaCore.create(project));
+        for (IPackageFragment mypackage : packages) {
+            if (mypackage.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                createAST(mypackage);
+            }
+
+        }
+    }
+
+    private void createAST(IPackageFragment mypackage) throws JavaModelException {
+        for (ICompilationUnit unit : mypackage.getCompilationUnits()) {
+            // now create the AST for the ICompilationUnits
+            CompilationUnit parse = parse(unit);
+            FieldVisitor visitor = new FieldVisitor();
+            parse.accept(visitor);
+
+            for (FieldDeclaration fieldDeclaration : visitor.getFields()) {
+                System.out.print(fieldDeclaration.toString());
+            }
+
+        }
+    }
+
+    /**
+     * Reads a ICompilationUnit and creates the AST DOM for manipulating the
+     * Java source file
+     *
+     * @param unit
+     * @return
+     */
+
+    private static CompilationUnit parse(ICompilationUnit unit) {
+        ASTParser parser = ASTParser.newParser(AST.JLS3);
+        parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        parser.setSource(unit);
+        parser.setResolveBindings(true);
+        return (CompilationUnit) parser.createAST(null); // parse
+    }
+    
+    //============================================================================
 
 
     private void printProjectInfo(IProject project) throws CoreException,
@@ -219,5 +221,14 @@ public class ReadFileHandler extends AbstractHandler {
         for (IField field : fields) {
         	this.templateComment += " * ... this."+field.getElementName()+" ...   - " + Signature.getSignatureSimpleName(field.getTypeSignature())+"\n";
         }
+    }
+    
+    private void addComment(String comment,ICompilationUnit element) {
+    	ASTParser parser = ASTParser.newParser(AST.JLS8);
+        ​parser.setResolveBindings(true);
+        ​parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        ​parser.setBindingsRecovery(true);
+        parser.setSource(element);
+        ​CompilationUnit astRoot = (CompilationUnit) parser.createAST(null);
     }
 }
