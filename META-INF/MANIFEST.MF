@@ -12,3 +12,5 @@ Automatic-Module-Name: Template_Generator
 Bundle-RequiredExecutionEnvironment: JavaSE-1.8
 Bundle-ClassPath: org.eclipse.text_3.5.0.jar,
  .
+Import-Package: org.eclipse.jface.text,
+ org.eclipse.text.edits

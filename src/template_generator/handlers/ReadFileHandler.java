@@ -5,6 +5,7 @@ import static org.eclipse.jdt.core.dom.ASTParser.newParser;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.util.List;
 
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
@@ -58,177 +59,192 @@ import org.eclipse.jdt.core.dom.StringLiteral;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
+import org.eclipse.jdt.internal.core.JavaProject;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 
 
 public class ReadFileHandler extends AbstractHandler {
 
-	private String templateComment;
+    private IWorkbenchWindow window;
+    private IWorkbenchPage activePage;
 	
+    // gets called when command is executed (CNTRL + 6)
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
+		String selection = getSelectedFile(event);
+		if(selection!=null) {
+			JavaProject selectedProject = getSelectedProject(event);
+			if(selectedProject!=null) {
+				try {
+					ICompilationUnit selectedIComp = getICompFromProject(selectedProject.getPackageFragments(),selection);
+					if(selectedIComp!=null) {
+						addCommentTo(selectedIComp,"//HELLO WORLD!!");
+					}
+				} catch (JavaModelException | IllegalArgumentException | MalformedTreeException | BadLocationException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}	
+		}else {
+			MessageDialog.openError(this.window.getShell(), "Error", "Please select a file from the project explorer.");
+		}
 		
-		IWorkspace workspace = ResourcesPlugin.getWorkspace();
-        IWorkspaceRoot root = workspace.getRoot();
-        // Get all projects in the workspace
-        IProject[] projects = root.getProjects();
-        // Loop over all projects
-        for (IProject project : projects) {
-            try {
-                analyzeFields(project);
-            } catch (CoreException e) {
-                e.printStackTrace();
+        return null;
+	}
+	
+	// gets the name of the selected file, and returns null if a file was not selected
+	private String getSelectedFile(ExecutionEvent event) {
+		this.window = HandlerUtil.getActiveWorkbenchWindow(event); 
+		// Get the active WorkbenchPage
+        this.activePage = this.window.getActivePage();
+        
+     // Get the Selection from the active WorkbenchPage page
+        ISelection selection = this.activePage.getSelection();
+        if(selection instanceof ITreeSelection) {
+            TreeSelection treeSelection = (TreeSelection) selection;
+            TreePath[] treePaths = treeSelection.getPaths();
+            TreePath treePath = treePaths[0];
+            
+            Object fileSelection = treePath.getLastSegment();
+            if(fileSelection instanceof org.eclipse.jdt.internal.core.CompilationUnit) {
+            	org.eclipse.jdt.internal.core.CompilationUnit unit = (org.eclipse.jdt.internal.core.CompilationUnit)fileSelection;
+            	return unit.getElementName();
             }
+        }
+        return null;
+	}
+
+	// gets the selected project, and returns null if file was not selected
+	private JavaProject getSelectedProject(ExecutionEvent event) {
+		this.window = HandlerUtil.getActiveWorkbenchWindow(event); 
+		// Get the active WorkbenchPage
+        this.activePage = this.window.getActivePage();
+        // Get the Selection from the active WorkbenchPage page
+        ISelection selection = this.activePage.getSelection();
+        TreeSelection treeSelection = (TreeSelection) selection;
+        TreePath[] treePaths = treeSelection.getPaths();
+        TreePath treePath = treePaths[0];
+        Object projectSelected = treePath.getFirstSegment();
+        if(projectSelected instanceof JavaProject) {
+        	JavaProject unit = (JavaProject)projectSelected;
+        	return unit;
+        }
+        return null;
+	}
+	
+	// get ICOMP selected
+	private ICompilationUnit getICompFromProject(IPackageFragment[] packages,String selectedFileName) throws JavaModelException {
+		for (IPackageFragment mypackage : packages) {
+            if (mypackage.getKind() == IPackageFragmentRoot.K_SOURCE) {
+            	for (ICompilationUnit unit : mypackage.getCompilationUnits()) {
+                    if(unit.getElementName().equals(selectedFileName)) {
+                    	return unit;
+                    }
+                }
+            }
+
         }
 		return null;
 	}
+
+	// write a comment to a given ICOMP file
+	private void addCommentTo(ICompilationUnit unit,String comment) throws JavaModelException, IllegalArgumentException, MalformedTreeException, BadLocationException {
+
+		// read the whole file
+		CompilationUnit astRoot = parse(unit);
+		
+		//create a ASTRewrite
+		AST ast = astRoot.getAST();
+		ASTRewrite rewriter = ASTRewrite.create(ast);
+	 
+		// get all type declarations on the file
+		List<TypeDeclaration> types = astRoot.types();
+		
+		// apply the text edits to the compilation unit
+		Document document = new Document(unit.getSource());
+		
+		// go through each type declaration
+		for(TypeDeclaration type : types) {
+			// ensure its not an interface (we want to ignore those)
+			if(!type.isInterface()) {
+				
+				// all the fields in this class
+				String fieldsTemplateSection = generateFieldsTemplateSection(type.getFields());
+				// all the methods in this class
+				MethodDeclaration[] methods = type.getMethods();
+				String methodsTemplateSection = generateMethodTemplateSection(methods);
+				System.out.println(fieldsTemplateSection + "\n * "+methodsTemplateSection);
+				
+				// add the comment to an object that can then be written into the AST
+				System.out.println("Writing to: " + type.getName());
+				ListRewrite listRewrite = rewriter.getListRewrite(methods[methods.length-1].getBody(), Block.STATEMENTS_PROPERTY);				
+				Statement placeHolder = (Statement) rewriter.createStringPlaceholder(comment, ASTNode.EMPTY_STATEMENT);
+				listRewrite.insertFirst(placeHolder, null);
+				
+				// create the edit
+				TextEdit edits = rewriter.rewriteAST();
+
+				// error is thrown here D:
+				edits.apply(document);
+				
+			}
+		}
+		
+		//save changes
+		unit.getBuffer().setContents(document.get());
+	}
 	
-	/* TEMP */
-	private void analyzeFields(IProject project) throws JavaModelException {
-        IPackageFragment[] packages = JavaCore.create(project).getPackageFragments();
-        // parse(JavaCore.create(project));
-        for (IPackageFragment mypackage : packages) {
-            if (mypackage.getKind() == IPackageFragmentRoot.K_SOURCE) {
-                createAST(mypackage);
-            }
+	// generates the fields section of a template 
+	private String generateFieldsTemplateSection(FieldDeclaration[] fields) {
+		String result = fields.length>0? " * FIELDS: \n":"";
+		for(FieldDeclaration field : fields) {
+			String fullField = field.toString();
+			fullField = fullField.replaceAll(";", "");
+			fullField = fullField.replaceAll("\n", "");
+			if(fullField.toString().contains(" =")) {
+				fullField = fullField.substring(0,fullField.indexOf(" ="));
+			}else if(fullField.toString().contains("=")) {
+				fullField = fullField.substring(0,fullField.indexOf("="));
+			}
+			
+			String[] parts = fullField.toString().split(" ");
+			String type = parts[parts.length-2];
+			String name = parts[parts.length-1];
+			result += " * ... this." + name+ " ...     - " + type + "\n";
+		}
+		return result;
+	}
+	
+	private String generateMethodTemplateSection(MethodDeclaration[] methods) {
+		String result = methods.length>0? " * METHODS: \n":"";
+		for(MethodDeclaration method : methods) {
+			String paramsString = "(";
+			List<Object> params = method.parameters();
+			if(params.size()>0) {
+				for(Object p : params)
+				{
+					String[] paramParts = p.toString().split(" ");
+					String type = paramParts[paramParts.length-2];
+					paramsString += type +", ";
+				}
+				
+				paramsString = paramsString.substring(0,paramsString.length()-1);
+			}
+			paramsString += ")";
+			
+			result += " * ... this." + method.getName()+ paramsString + " ...     - " + method.getReturnType2() + "\n";
+		}
+		return result;
+	}
 
-        }
-    }
-
-    private void createAST(IPackageFragment mypackage) throws JavaModelException {
-        for (ICompilationUnit unit : mypackage.getCompilationUnits()) {
-            // now create the AST for the ICompilationUnits
-            CompilationUnit parse = parse(unit);
-            FieldVisitor visitor = new FieldVisitor();
-            parse.accept(visitor);
-
-            for (FieldDeclaration fieldDeclaration : visitor.getFields()) {
-                System.out.print(fieldDeclaration.toString());
-            }
-
-        }
-    }
-
-    /**
-     * Reads a ICompilationUnit and creates the AST DOM for manipulating the
-     * Java source file
-     *
-     * @param unit
-     * @return
-     */
-
-    private static CompilationUnit parse(ICompilationUnit unit) {
+	// parses an ICompilationUnit to a CompilationUnit
+	private static CompilationUnit parse(ICompilationUnit unit) {
         ASTParser parser = ASTParser.newParser(AST.JLS3);
         parser.setKind(ASTParser.K_COMPILATION_UNIT);
         parser.setSource(unit);
         parser.setResolveBindings(true);
         return (CompilationUnit) parser.createAST(null); // parse
     }
-    
-    //============================================================================
 
-
-    private void printProjectInfo(IProject project) throws CoreException,
-            JavaModelException, MalformedTreeException, BadLocationException {
-        System.out.println("Working in project " + project.getName());
-        // check if we have a Java project
-        if (project.isNatureEnabled("org.eclipse.jdt.core.javanature")) {
-            IJavaProject javaProject = JavaCore.create(project);
-            printPackageInfos(javaProject);
-        }
-    }
-
-    private void printPackageInfos(IJavaProject javaProject)
-            throws JavaModelException, MalformedTreeException, BadLocationException {
-        IPackageFragment[] packages = javaProject.getPackageFragments();
-        for (IPackageFragment mypackage : packages) {
-            if (mypackage.getKind() == IPackageFragmentRoot.K_SOURCE) {
-                System.out.println("Package " + mypackage.getElementName());
-                printICompilationUnitInfo(mypackage);
-
-            }
-
-        }
-    }
-	private void printICompilationUnitInfo(IPackageFragment mypackage)
-            throws JavaModelException, MalformedTreeException, BadLocationException {
-        for (ICompilationUnit unit : mypackage.getCompilationUnits()) {
-        	printCompilationUnitDetails(unit);
-        }
-    }
-
-	private void printIMethods(ICompilationUnit unit) throws JavaModelException {
-        IType[] allTypes = unit.getAllTypes();
-        for (IType type : allTypes) {
-        	if(type.isClass()) {
-        		this.templateComment = "/*TEMPLATE\n";
-            	System.out.println("\n"+type.getElementName());
-                this.templateComment += " * FIELDS: \n";
-                printIClassDetails(type);
-                this.templateComment += " * METHODS: \n";
-                printIMethodDetails(type);
-            	this.templateComment += "*/";
-                System.out.println(this.templateComment);
-        	}
-        }
-    }
-
-    private void printCompilationUnitDetails(ICompilationUnit unit)
-            throws JavaModelException {
-//        Document doc = new Document(unit.getSource());
-        printIMethods(unit);
-    }
-
-    private void printIMethodDetails(IType type) throws JavaModelException {	
-        IMethod[] methods = type.getMethods();
-        for (IMethod method : methods) {
-        	this.templateComment += " * ... this."+method.getElementName() +"("+Signature.getSignatureSimpleName(method.getSignature()).split(" \\(")[0]+") ...    - " + Signature.getSignatureSimpleName(method.getReturnType())+"\n";
-        }
-        
-
-    	String parentClassName = type.getSuperclassName();
-        if(parentClassName!=null) {
-        	// Call this on the parent class basically
-        }
-        
-    }
-
-    private void getMethodDetailsOf(Class<?> type) {
-    	System.out.println("Getting class methods for: " + type.getSimpleName());
-    	Method[] methods = type.getMethods();
-
-        for (Method method : methods) {
-        	
-        	String params = "";
-        	for(Parameter param :  method.getParameters()) {
-        		params += Signature.getSignatureSimpleName(param.getName())+",";
-        	}
-        	
-        	this.templateComment += " * ... this."+method.getName() +"("+params+") ...    - " + method.getReturnType().getSimpleName()+"\n";
-        }
-        
-        if(type.getSuperclass()!=null) {
-        	System.out.println("Getting superclass: " + type.getSuperclass().getSimpleName());
-        	getMethodDetailsOf(type.getSuperclass());
-        }
-    }
-    
-    
-    
-    private void printIClassDetails(IType type) throws JavaModelException {
-        IField[] fields = type.getFields();
-        for (IField field : fields) {
-        	this.templateComment += " * ... this."+field.getElementName()+" ...   - " + Signature.getSignatureSimpleName(field.getTypeSignature())+"\n";
-        }
-    }
-    
-    private void addComment(String comment,ICompilationUnit element) {
-    	ASTParser parser = ASTParser.newParser(AST.JLS8);
-        ​parser.setResolveBindings(true);
-        ​parser.setKind(ASTParser.K_COMPILATION_UNIT);
-        ​parser.setBindingsRecovery(true);
-        parser.setSource(element);
-        ​CompilationUnit astRoot = (CompilationUnit) parser.createAST(null);
-    }
 }
