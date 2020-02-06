@@ -51,6 +51,7 @@ import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.Block;
+import org.eclipse.jdt.core.dom.ChildListPropertyDescriptor;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
@@ -164,32 +165,30 @@ public class ReadFileHandler extends AbstractHandler {
 		// apply the text edits to the compilation unit
 		Document document = new Document(unit.getSource());
 		
+		
 		// go through each type declaration
 		for(TypeDeclaration type : types) {
 			// ensure its not an interface (we want to ignore those)
-			if(!type.isInterface()) {
-				
-				// all the fields in this class
-				String fieldsTemplateSection = generateFieldsTemplateSection(type.getFields());
-				// all the methods in this class
-				MethodDeclaration[] methods = type.getMethods();
-				String methodsTemplateSection = generateMethodTemplateSection(methods);
-				System.out.println(fieldsTemplateSection + "\n * "+methodsTemplateSection);
-				
-				// add the comment to an object that can then be written into the AST
-				System.out.println("Writing to: " + type.getName());
-				ListRewrite listRewrite = rewriter.getListRewrite(methods[methods.length-1].getBody(), Block.STATEMENTS_PROPERTY);				
-				Statement placeHolder = (Statement) rewriter.createStringPlaceholder(comment, ASTNode.EMPTY_STATEMENT);
-				listRewrite.insertFirst(placeHolder, null);
-				
-				// create the edit
-				TextEdit edits = rewriter.rewriteAST();
-
-				// error is thrown here D:
-				edits.apply(document);
-				
-			}
+			if(type.isInterface()) continue;
+			
+			// all the fields in this class
+			String fieldsTemplateSection = generateFieldsTemplateSection(type.getFields());
+			// all the methods in this class
+			MethodDeclaration[] methods = type.getMethods();
+			String methodsTemplateSection = generateMethodTemplateSection(methods);
+			String template = "\n/*TEMPLATE \n"+fieldsTemplateSection + "\n * "+methodsTemplateSection+"*/";
+			
+			// add the comment to an object that can then be written into the AST
+			System.out.println("Writing to: " + type.getName());
+			ListRewrite listRewrite = rewriter.getListRewrite(methods[methods.length-1].getBody(), (ChildListPropertyDescriptor) Block.propertyDescriptors(Block.BLOCK_COMMENT).get(0));				
+			Statement placeHolder = (Statement) rewriter.createStringPlaceholder(template, ASTNode.EMPTY_STATEMENT);
+			listRewrite.insertFirst(placeHolder, null);
+			
+			
 		}
+
+		// error is thrown here D:
+		rewriter.rewriteAST().apply(document);
 		
 		//save changes
 		unit.getBuffer().setContents(document.get());
